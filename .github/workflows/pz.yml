@@ -1,0 +1,85 @@
+name: Upload Project Zomboid Archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 2: Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y curl wget grep sed
+
+      # Step 3: Create Git Tag
+      - name: Create Git Tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git tag "v${{ github.event.inputs.version_tag }}"
+          git push origin "v${{ github.event.inputs.version_tag }}"
+
+      # Step 4: List repository files
+      - name: List files
+        run: ls -la
+
+      # Step 5: Download Project Zomboid from MediaFire
+      - name: Download Project Zomboid archive
+        run: |
+          MEDIAFIRE_URL="https://www.mediafire.com/file/j0bdhz7ddqrxkrc/projectzomboid.zip/file"
+
+          DOWNLOAD_URL=$(curl -Ls "$MEDIAFIRE_URL" \
+            | grep -oP '(?<=href=")https://download[^"]+')
+
+          echo "Resolved direct download URL:"
+          echo "$DOWNLOAD_URL"
+
+          wget "$DOWNLOAD_URL" -O projectzomboid.zip
+
+      # Step 6: Generate MD5 checksum
+      - name: Generate MD5 checksum
+        run: |
+          echo "### File Checksums" > checksums.txt
+          md5sum projectzomboid.zip | awk '{print "- **"$2"** → `"$1"`"}' >> checksums.txt
+
+          echo "md5_list<<EOF" >> $GITHUB_ENV
+          cat checksums.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      # Step 7: Create GitHub Release and upload asset
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "v${{ github.event.inputs.version_tag }}"
+          name: "Project Zomboid Archive"
+          files: |
+            projectzomboid.zip
+          body: |
+            🧟 **Project Zomboid Game Archive**
+
+            ### 🧾 Checksums
+            ${{ env.md5_list }}
+
+            ---
+            Uploaded automatically via GitHub Actions
