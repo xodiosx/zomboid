@@ -1,12 +1,12 @@
-name: Upload Project Zomboid Archive
+name: Upload Project Zomboid Archive (Split)
 
 on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version tag (e.g., 1.0.0)'
+        description: 'Version tag (e.g., 42-linux-amd)'
         required: true
-        default: '1.0.0'
+        default: '42-linux-amd'
 
 permissions:
   contents: write
@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y curl wget grep sed
+          sudo apt install -y curl wget grep sed coreutils
 
       # Step 3: Create Git Tag
       - name: Create Git Tag
@@ -38,11 +38,7 @@ jobs:
           git tag "v${{ github.event.inputs.version_tag }}"
           git push origin "v${{ github.event.inputs.version_tag }}"
 
-      # Step 4: List repository files
-      - name: List files
-        run: ls -la
-
-      # Step 5: Download Project Zomboid from MediaFire
+      # Step 4: Download Project Zomboid from MediaFire
       - name: Download Project Zomboid archive
         run: |
           MEDIAFIRE_URL="https://www.mediafire.com/file/j0bdhz7ddqrxkrc/projectzomboid.zip/file"
@@ -50,23 +46,37 @@ jobs:
           DOWNLOAD_URL=$(curl -Ls "$MEDIAFIRE_URL" \
             | grep -oP '(?<=href=")https://download[^"]+')
 
-          echo "Resolved direct download URL:"
+          echo "Resolved MediaFire direct URL:"
           echo "$DOWNLOAD_URL"
 
           wget "$DOWNLOAD_URL" -O projectzomboid.zip
 
-      # Step 6: Generate MD5 checksum
-      - name: Generate MD5 checksum
+      # Step 5: Split archive into 1.99GB parts and rename
+      - name: Split archive into parts
+        run: |
+          split -b 1999M projectzomboid.zip
+
+          i=1
+          for part in x*; do
+            mv "$part" "projectzomboid.zip.$i"
+            i=$((i + 1))
+          done
+
+          echo "Split files:"
+          ls -lh projectzomboid.zip.*
+
+      # Step 6: Generate MD5 checksums for parts
+      - name: Generate MD5 checksums
         run: |
           echo "### File Checksums" > checksums.txt
-          md5sum projectzomboid.zip | awk '{print "- **"$2"** → `"$1"`"}' >> checksums.txt
+          md5sum projectzomboid.zip.* | awk '{print "- **"$2"** → `"$1"`"}' >> checksums.txt
 
           echo "md5_list<<EOF" >> $GITHUB_ENV
           cat checksums.txt >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 7: Create GitHub Release and upload asset
-      - name: Create GitHub Release
+      # Step 7: Create GitHub Release and upload split files
+      - name: Create GitHub Release with split files
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,9 +84,16 @@ jobs:
           tag_name: "v${{ github.event.inputs.version_tag }}"
           name: "Project Zomboid Archive"
           files: |
-            projectzomboid.zip
+            projectzomboid.zip.*
           body: |
-            🧟 **Project Zomboid Game Archive**
+            🧟 **Project Zomboid Game Archive (Split)**
+
+            📦 This archive is split into 1.99GB parts due to GitHub file size limits.
+
+            ### 🔧 How to Reassemble
+            ```bash
+            cat projectzomboid.zip.* > projectzomboid.zip
+            ```
 
             ### 🧾 Checksums
             ${{ env.md5_list }}
